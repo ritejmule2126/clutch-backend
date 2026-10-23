@@ -1,0 +1,1 @@
+Project Clutch architecture uses FastAPI and React. It operates within a 23000 rupee budget.

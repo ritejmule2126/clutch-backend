@@ -3,5 +3,9 @@ __pycache__/
 *.pyc
 data/uploads/
 data/*.db
+data/keys.json
 .pytest_cache/
 .env
+.env.*
+app-config.json
+lib/

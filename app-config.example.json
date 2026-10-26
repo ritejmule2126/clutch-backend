@@ -1,0 +1,13 @@
+{
+  "command": "python3 run.py",
+  "build_path": "./",
+  "stack": "python_3_9",
+  "memory": 512,
+  "env_variables": {
+    "APP_NAME": "Clutch AI API",
+    "SECRET_KEY": "your-production-secret-key-32chars",
+    "GEMINI_API_KEY": "your-gemini-api-key-here",
+    "DEFAULT_LLM_PROVIDER": "gemini",
+    "DEFAULT_MODEL": "gemini-3.5-flash"
+  }
+}

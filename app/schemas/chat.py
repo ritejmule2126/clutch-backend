@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Any
 from datetime import datetime
@@ -14,6 +15,9 @@ class ChatMessageCreate(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     use_rag: bool = True
+    api_key: Optional[str] = None
+    timezone: Optional[str] = None
+    client_time: Optional[str] = None
 
 class ChatMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

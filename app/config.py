@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import os
@@ -23,13 +24,14 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_BYTES: int = 25 * 1024 * 1024  # 25 MB
     
     # AI Providers
+    ANTHROPIC_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     
-    DEFAULT_LLM_PROVIDER: str = "groq"
-    DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+    DEFAULT_LLM_PROVIDER: str = "gemini"
+    DEFAULT_MODEL: str = "gemini-3.5-flash"
     
     # Embeddings
     EMBEDDING_DIMENSION: int = 384

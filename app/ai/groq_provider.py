@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 from typing import AsyncGenerator, List, Optional
 import httpx
@@ -15,7 +16,7 @@ class GroqProvider(BaseLLMProvider):
         messages: List[PromptMessage],
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2048
+        max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         if not self.api_key:
             raise ValueError("GROQ_API_KEY is not configured.")
@@ -34,7 +35,7 @@ class GroqProvider(BaseLLMProvider):
             "Content-Type": "application/json"
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
@@ -56,7 +57,9 @@ class GroqProvider(BaseLLMProvider):
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"].get("content", "")
                             if delta:
-                                yield delta
+                                # Harmonize <think> to <thinking> for Claude UI compatibility
+                                harmonized = delta.replace("<think>", "<thinking>\n").replace("</think>", "\n</thinking>\n\n")
+                                yield harmonized
                         except Exception:
                             continue
 
@@ -65,7 +68,7 @@ class GroqProvider(BaseLLMProvider):
         messages: List[PromptMessage],
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2048
+        max_tokens: int = 4096
     ) -> LLMResponse:
         full_content = []
         async for chunk in self.generate_stream(messages, model, temperature, max_tokens):

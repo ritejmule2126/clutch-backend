@@ -1,7 +1,10 @@
+from __future__ import annotations
 import json
 import asyncio
+from datetime import datetime, timezone
+import zoneinfo
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -20,6 +23,8 @@ from app.core.deps import get_current_user
 from app.rag.retriever import search_relevant_chunks
 from app.ai.gateway import get_llm_provider
 from app.ai.base import PromptMessage
+from app.ai.prompts import CLAUDE_PRINCIPAL_ENGINEER_SYSTEM_PROMPT
+from app.ai.stream_parser import ThinkingStreamParser
 from app.config import settings
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -126,6 +131,7 @@ async def delete_session(
 
 @router.post("/stream")
 async def stream_chat_message(
+    request: Request,
     req: ChatMessageCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -144,12 +150,20 @@ async def stream_chat_message(
         await db.refresh(new_session)
         session_id = new_session.id
     else:
-        # Verify ownership
+        # Verify ownership or adopt client-generated session ID
         sess_check = await db.execute(
             select(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
         )
         if not sess_check.scalars().first():
-            raise HTTPException(status_code=404, detail="Chat session not found.")
+            adopted_session = ChatSession(
+                id=session_id,
+                user_id=current_user.id,
+                title=req.content[:36] + ("..." if len(req.content) > 36 else ""),
+                provider=req.provider or settings.DEFAULT_LLM_PROVIDER,
+                model=req.model or settings.DEFAULT_MODEL
+            )
+            db.add(adopted_session)
+            await db.commit()
 
     # 2. Save user message to database
     user_msg_rec = ChatMessage(
@@ -194,45 +208,83 @@ async def stream_chat_message(
     # Keep last 8 messages for context window management
     recent_history = all_prev[-8:] if len(all_prev) > 8 else all_prev
 
-    # 5. Build system prompt and prompt messages
-    sys_instruction = (
-        "You are Clutch AI, a knowledgeable, concise, and helpful personal AI assistant.\n"
-        "Guidelines:\n"
-        "- Answer the user's inquiry directly, accurately, and concisely.\n"
-        "- If context documents are provided below, ground your response in the verified evidence.\n"
-        "- If you cite information from a document, reference it cleanly with bracketed citations like [1] or [2].\n"
-        "- Do NOT show internal thoughts, reasoning tags, or fake thinking prefixes.\n"
+    # 5. Dynamically resolve runtime client timezone and clock (zero hardcoded values)
+    client_tz_name = (
+        req.timezone
+        or request.headers.get("x-timezone")
+        or request.headers.get("cf-timezone")
+        or None
     )
 
+    utc_now = datetime.now(timezone.utc)
+    user_tz = None
+    if client_tz_name:
+        try:
+            user_tz = zoneinfo.ZoneInfo(client_tz_name)
+        except Exception:
+            user_tz = None
+
+    # Fallback to dynamic host environment timezone if not specified by client
+    if not user_tz:
+        user_tz = utc_now.astimezone().tzinfo or timezone.utc
+        client_tz_name = getattr(user_tz, "key", str(user_tz))
+
+    local_now = utc_now.astimezone(user_tz)
+    tz_abbrev = local_now.strftime("%Z")
+    tz_offset = local_now.strftime("%z")
+    formatted_local = local_now.strftime("%A, %B %d, %Y at %I:%M:%S %p")
+    formatted_utc = utc_now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    temporal_block = f"""CLIENT ENVIRONMENT & TEMPORAL CONTEXT:
+- Local Client Date & Time: {formatted_local} ({tz_abbrev}, UTC{tz_offset})
+- Local Client Timezone: {client_tz_name}
+- UTC Timestamp: {formatted_utc}
+
+OPERATIONAL TEMPORAL DIRECTIVES:
+- You have verified access to the client's current runtime system clock above.
+- When asked for the current time, date, day, or year, state their exact local time ({formatted_local} {tz_abbrev}) directly, politely, and accurately.
+- Never state that you lack a real-time clock or do not know the user's timezone.
+- For simple everyday questions (time, greetings, short facts), answer naturally and directly without generating a <thinking> block."""
+
+    sys_instruction = f"{CLAUDE_PRINCIPAL_ENGINEER_SYSTEM_PROMPT}\n\n{temporal_block}"
     if context_text:
-        sys_instruction += f"\n\nCONTEXT DOCUMENTS:\n{context_text}\n\nRULES: Base your response on the context above."
+        sys_instruction += f"\n\nCONTEXT DOCUMENTS:\n{context_text}\n\nRULES: Base your response on the verified evidence above."
 
     prompt_messages = [PromptMessage(role="system", content=sys_instruction)]
     for m in recent_history:
         prompt_messages.append(PromptMessage(role=m.role, content=m.content))
 
-    # 6. Stream tokens via SSE
-    llm_provider = get_llm_provider(req.provider)
+    # 6. Stream tokens via SSE with Thinking stream separation
+    llm_provider = get_llm_provider(req.provider, api_key_override=req.api_key)
 
     async def event_generator():
-        accumulated_text = []
+        parser = ThinkingStreamParser()
         try:
             # Yield session ID first so client knows which session this belongs to
             yield f"data: {json.dumps({'type': 'init', 'session_id': session_id})}\n\n"
 
             async for token in llm_provider.generate_stream(prompt_messages, model=req.model):
-                accumulated_text.append(token)
-                yield f"data: {json.dumps({'type': 'token', 'delta': token})}\n\n"
+                for event_type, chunk in parser.feed(token):
+                    payload = {"type": event_type}
+                    if event_type in ["token", "thinking"]:
+                        payload["delta"] = chunk
+                    yield f"data: {json.dumps(payload)}\n\n"
 
-            full_answer = "".join(accumulated_text)
+            for event_type, chunk in parser.flush():
+                payload = {"type": event_type}
+                if event_type in ["token", "thinking"]:
+                    payload["delta"] = chunk
+                yield f"data: {json.dumps(payload)}\n\n"
 
-            # Persist assistant response with citations
+            clean_answer = parser.clean_text
+
+            # Persist assistant response with clean answer (no raw thinking tags)
             async with AsyncSessionLocal() as save_db:
                 asst_rec = ChatMessage(
                     session_id=session_id,
                     user_id=current_user.id,
                     role="assistant",
-                    content=full_answer,
+                    content=clean_answer,
                     citations_json=json.dumps([c.model_dump() for c in citations]) if citations else None
                 )
                 save_db.add(asst_rec)

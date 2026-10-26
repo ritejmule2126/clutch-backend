@@ -131,3 +131,34 @@ async def test_chat_streaming():
         assert "data: " in body
         assert '"type": "init"' in body
         assert '"type": "done"' in body
+        # Ensure old boilerplate warning is completely eliminated
+        assert "To enable full generative reasoning" not in body
+        assert "<thinking>" in body
+
+@pytest.mark.asyncio
+async def test_settings_and_runtime_keys():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Register user
+        unique_email = f"sett_{os.urandom(4).hex()}@example.com"
+        reg = await client.post("/api/v1/auth/register", json={
+            "email": unique_email,
+            "password": "Password123!"
+        })
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Check system settings
+        res = await client.get("/api/v1/settings/", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert any(p["name"] == "claude" for p in data["active_providers"])
+
+        # Update dynamic key
+        update_res = await client.post("/api/v1/settings/keys", json={
+            "provider": "anthropic",
+            "api_key": "sk-ant-test-key-mock-1234"
+        }, headers=headers)
+        assert update_res.status_code == 200
+        assert update_res.json()["status"] == "success"
+

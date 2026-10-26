@@ -1,3 +1,4 @@
+from __future__ import annotations
 from app.models.user import User
 from app.models.document import Document, DocumentChunk
 from app.models.chat import ChatSession, ChatMessage

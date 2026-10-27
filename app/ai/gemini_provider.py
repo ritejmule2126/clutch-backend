@@ -9,11 +9,11 @@ class GeminiProvider(BaseLLMProvider):
     """
     Google Gemini Provider supporting Gemini 2.0 Flash & Gemini 1.5 Pro.
     """
-    CANDIDATE_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-flash-lite-latest"]
+    CANDIDATE_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-pro"]
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
-        self.default_model = "gemini-3.5-flash"
+        self.default_model = "gemini-flash-lite-latest"
 
     async def generate_stream(
         self,

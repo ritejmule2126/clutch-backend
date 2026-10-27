@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     
     DEFAULT_LLM_PROVIDER: str = "gemini"
-    DEFAULT_MODEL: str = "gemini-3.5-flash"
+    DEFAULT_MODEL: str = "gemini-flash-lite-latest"
     
     # Embeddings
     EMBEDDING_DIMENSION: int = 384

@@ -22,6 +22,7 @@ class DocumentResponse(BaseModel):
     status: str
     chunk_count: int
     summary: Optional[str] = ""
+    extracted_text: Optional[str] = ""
     created_at: datetime
     updated_at: datetime
 

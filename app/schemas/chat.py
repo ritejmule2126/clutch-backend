@@ -18,6 +18,8 @@ class ChatMessageCreate(BaseModel):
     api_key: Optional[str] = None
     timezone: Optional[str] = None
     client_time: Optional[str] = None
+    attached_doc_title: Optional[str] = None
+    attached_doc_content: Optional[str] = None
 
 class ChatMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

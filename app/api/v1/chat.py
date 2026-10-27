@@ -176,28 +176,43 @@ async def stream_chat_message(
     db.add(user_msg_rec)
     await db.commit()
 
-    # 3. Retrieve relevant chunks if RAG is requested
+    # 3. Retrieve relevant chunks if RAG is requested, and process directly attached document
     citations: List[CitationItem] = []
     context_text = ""
+
+    if req.attached_doc_content and req.attached_doc_content.strip():
+        doc_title = req.attached_doc_title or "Attached Document"
+        attached_snippet = req.attached_doc_content[:45000]
+        context_text += f"\n\n=== ATTACHED DOCUMENT: {doc_title} ===\n{attached_snippet}\n=== END ATTACHED DOCUMENT ===\n"
+        citations.append(CitationItem(
+            document_id="attached_file",
+            document_title=doc_title,
+            page_number=1,
+            snippet=req.attached_doc_content[:180] + "..."
+        ))
+
     if req.use_rag:
-        retrieved_chunks = await search_relevant_chunks(
-            user_id=current_user.id,
-            query=req.content,
-            db=db,
-            limit=4
-        )
-        if retrieved_chunks:
-            context_blocks = []
-            for idx, ch in enumerate(retrieved_chunks):
-                cit = CitationItem(
-                    document_id=ch.document_id,
-                    document_title=ch.document_title,
-                    page_number=ch.page_number,
-                    snippet=ch.content[:160] + "..."
-                )
-                citations.append(cit)
-                context_blocks.append(f"[{idx+1}] Source: {ch.document_title} (Page {ch.page_number}):\n{ch.content}")
-            context_text = "\n\n".join(context_blocks)
+        try:
+            retrieved_chunks = await search_relevant_chunks(
+                user_id=current_user.id,
+                query=req.content,
+                db=db,
+                limit=4
+            )
+            if retrieved_chunks:
+                context_blocks = []
+                for idx, ch in enumerate(retrieved_chunks):
+                    cit = CitationItem(
+                        document_id=ch.document_id,
+                        document_title=ch.document_title,
+                        page_number=ch.page_number,
+                        snippet=ch.content[:160] + "..."
+                    )
+                    citations.append(cit)
+                    context_blocks.append(f"[{idx+1}] Source: {ch.document_title} (Page {ch.page_number}):\n{ch.content}")
+                context_text += "\n\n" + "\n\n".join(context_blocks)
+        except Exception:
+            pass
 
     # 4. Fetch recent conversation history
     history_res = await db.execute(
@@ -249,7 +264,7 @@ OPERATIONAL TEMPORAL DIRECTIVES:
 
     sys_instruction = f"{CLAUDE_PRINCIPAL_ENGINEER_SYSTEM_PROMPT}\n\n{temporal_block}"
     if context_text:
-        sys_instruction += f"\n\nCONTEXT DOCUMENTS:\n{context_text}\n\nRULES: Base your response on the verified evidence above."
+        sys_instruction += f"\n\nCONTEXT DOCUMENTS:\n{context_text}\n\nRULES: The user has provided verified context or attached document content above. Analyze the document carefully and answer the user's questions with complete accuracy, citing exact details, numbers, and facts directly from the document. Never say you cannot view the document."
 
     # Live Real-Time Web Search for Latest News & Events
     if should_fetch_live_web(req.content):

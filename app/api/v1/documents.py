@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.document import Document, DocumentChunk
 from app.schemas.document import DocumentResponse, DocumentDetailResponse, SearchRequest, SearchResultItem
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_optional_current_user
 from app.config import settings
 from app.rag.extractor import extract_text_from_file
 from app.rag.chunker import chunk_pages
@@ -18,6 +18,42 @@ from app.rag.embeddings import get_embedding
 from app.rag.retriever import search_relevant_chunks
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+@router.post("/extract")
+async def extract_document_text(
+    file: UploadFile = File(...),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
+    import uuid
+    contents = await file.read()
+    filename = file.filename or "attachment"
+    ext = os.path.splitext(filename)[1].lower().replace(".", "")
+    
+    user_id = current_user.id if current_user else "guest"
+    user_dir = os.path.join(settings.UPLOAD_DIR, user_id)
+    os.makedirs(user_dir, exist_ok=True)
+    temp_path = os.path.join(user_dir, f"extract_{uuid.uuid4().hex[:8]}_{filename}")
+    
+    with open(temp_path, "wb") as f:
+        f.write(contents)
+        
+    try:
+        pages = extract_text_from_file(temp_path, ext)
+        extracted = "\n\n".join(p.text for p in pages if p.text.strip())
+        return {
+            "filename": filename,
+            "file_type": ext,
+            "page_count": len(pages),
+            "text": extracted,
+            "word_count": len(extracted.split())
+        }
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 @router.post("/upload", response_model=DocumentResponse)
 async def upload_document(
@@ -89,6 +125,7 @@ async def upload_document(
         doc.chunk_count = len(chunks)
         doc.summary = summary_preview
         doc.status = "ready"
+        doc.extracted_text = "\n\n".join(p.text for p in pages if p.text.strip())
         await db.commit()
         await db.refresh(doc)
     except Exception as e:

@@ -25,6 +25,7 @@ from app.ai.gateway import get_llm_provider
 from app.ai.base import PromptMessage
 from app.ai.prompts import CLAUDE_PRINCIPAL_ENGINEER_SYSTEM_PROMPT
 from app.ai.stream_parser import ThinkingStreamParser
+from app.ai.web_search import should_fetch_live_web, search_live_news
 from app.config import settings
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -249,6 +250,15 @@ OPERATIONAL TEMPORAL DIRECTIVES:
     sys_instruction = f"{CLAUDE_PRINCIPAL_ENGINEER_SYSTEM_PROMPT}\n\n{temporal_block}"
     if context_text:
         sys_instruction += f"\n\nCONTEXT DOCUMENTS:\n{context_text}\n\nRULES: Base your response on the verified evidence above."
+
+    # Live Real-Time Web Search for Latest News & Events
+    if should_fetch_live_web(req.content):
+        try:
+            live_news_context = await search_live_news(req.content, max_results=5)
+            if live_news_context:
+                sys_instruction += f"\n\n{live_news_context}\n\nRULES: The user is asking about current/latest events, IPOs, or real-time news. Use the verified live news reports above to answer with 100% accurate, up-to-the-minute information. State the dates and status clearly."
+        except Exception:
+            pass
 
     prompt_messages = [PromptMessage(role="system", content=sys_instruction)]
     for m in recent_history:
